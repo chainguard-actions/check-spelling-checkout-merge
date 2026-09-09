@@ -1,0 +1,64 @@
+name: Test basic merge success
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up git repo with two mergeable branches
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+
+          # Create a bare repo to act as origin (reachable from workspace)
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+
+          # Push current HEAD as base branch
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/base-branch
+
+          # Create a feature branch with a new commit
+          git checkout -b feature-branch
+          echo "feature content" > feature-file.txt
+          git add feature-file.txt
+          git commit -m "Add feature file"
+
+          # Push feature branch to bare remote
+          git push "$GITHUB_WORKSPACE/.git-remote" feature-branch:refs/heads/feature-branch
+
+          # Go back to base branch
+          git checkout act-harness
+
+          # Point origin at the bare repo
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+          # Set up a fake GITHUB_EVENT_PATH with sender info
+          printf '{"sender":{"login":"github-actions"},"pusher":{"email":"github-actions@github.com"}}\n' > /tmp/fake-event.json
+          echo "GITHUB_EVENT_PATH=/tmp/fake-event.json" >> "$GITHUB_ENV"
+
+      - id: action
+        uses: .
+        with:
+          base_ref: base-branch
+          head_ref: refs/heads/feature-branch
+          do_not_report: "true"
+
+      - name: Assert merge outputs and file presence
+        env:
+          STATUS: ${{ steps.action.outputs.status }}
+          MESSAGE: ${{ steps.action.outputs.message }}
+        run: |
+          echo "status: $STATUS"
+          echo "message: $MESSAGE"
+          # status output uses steps.merge.status which may be empty or 'success'
+          # The real indicator of success is the merged file being present
+          if [ ! -f "$GITHUB_WORKSPACE/feature-file.txt" ]; then
+            echo "FAIL: feature-file.txt not found after merge"
+            exit 1
+          fi
+          echo "PASS: feature-file.txt present after merge - merge succeeded"

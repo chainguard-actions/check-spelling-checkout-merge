@@ -1,6 +1,11 @@
 {
   "owner": "check-spelling",
   "repo": "checkout-merge",
-  "version": "",
-  "url": "https://github.com/check-spelling/checkout-merge"
+  "version": "v0.0.8",
+  "commit_sha": "c9cfe4b33a6ceb6c13136887a6fd3a3ed6443f28",
+  "url": "https://github.com/check-spelling/checkout-merge",
+  "policy_sha": "d636be7e43ef829af6e853da6b3c7566db9f72fe",
+  "test_policy_sha": "843adf9e4b8f85d0c08b27b9d0b09dd094b54702",
+  "test_agent_version": "2",
+  "harden_agent_version": "2"
 }

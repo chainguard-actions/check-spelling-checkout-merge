@@ -1,0 +1,81 @@
+name: Test merge conflict handling
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up git repo with conflicting branches
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+
+          # Create a bare repo to act as origin
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+
+          # Record the current HEAD as the common ancestor
+          ANCESTOR_SHA=$(git rev-parse HEAD)
+
+          # Create base branch: add a file then modify conflict-file differently
+          git checkout -b base-branch-conflict
+          echo "common ancestor" > conflict-file.txt
+          git add conflict-file.txt
+          git commit -m "Add conflict file (common ancestor)"
+          echo "base version of content" > conflict-file.txt
+          git add conflict-file.txt
+          git commit -m "Modify conflict file on base"
+          git push "$GITHUB_WORKSPACE/.git-remote" base-branch-conflict:refs/heads/base-branch-conflict
+
+          # Go back to common ancestor and create feature branch
+          git checkout act-harness
+          git checkout -b conflict-feature
+          echo "common ancestor" > conflict-file.txt
+          git add conflict-file.txt
+          git commit -m "Add conflict file (common ancestor)"
+          echo "feature version of content" > conflict-file.txt
+          git add conflict-file.txt
+          git commit -m "Modify conflict file on feature"
+          git push "$GITHUB_WORKSPACE/.git-remote" conflict-feature:refs/heads/conflict-feature
+
+          git checkout act-harness
+
+          # Point origin at the bare repo
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+          # Set up a fake GITHUB_EVENT_PATH with sender info
+          printf '{"sender":{"login":"github-actions"},"pusher":{"email":"github-actions@github.com"}}\n' > /tmp/fake-event.json
+          echo "GITHUB_EVENT_PATH=/tmp/fake-event.json" >> "$GITHUB_ENV"
+
+      - id: action
+        uses: .
+        with:
+          base_ref: base-branch-conflict
+          head_ref: refs/heads/conflict-feature
+          do_not_report: "true"
+
+      - name: Assert conflict was reported via message output
+        env:
+          STATUS: ${{ steps.action.outputs.status }}
+          MESSAGE: ${{ steps.action.outputs.message }}
+        run: |
+          echo "status: $STATUS"
+          echo "message: $MESSAGE"
+          # On conflict, the action writes message to GITHUB_OUTPUT and exits 0
+          # The message output should be non-empty and mention conflict
+          if [ -z "$MESSAGE" ]; then
+            echo "FAIL: expected a non-empty message for conflict scenario"
+            exit 1
+          fi
+          echo "PASS: message is non-empty: $MESSAGE"
+          # Verify the message mentions conflict
+          if ! echo "$MESSAGE" | grep -qi "conflict"; then
+            echo "FAIL: expected message to mention 'conflict' but got: $MESSAGE"
+            exit 1
+          fi
+          echo "PASS: message mentions conflict as expected"

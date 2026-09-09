@@ -1,0 +1,73 @@
+name: Test merge with custom path
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up a second git repo in a subdirectory
+        run: |
+          # Create a fresh git repo in a subdirectory (separate from workspace root)
+          mkdir -p "$GITHUB_WORKSPACE/repo-subdir"
+          cd "$GITHUB_WORKSPACE/repo-subdir"
+          git init
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+
+          # Create initial commit on base branch
+          echo "initial content" > initial-file.txt
+          git add initial-file.txt
+          git commit -m "Initial commit"
+          git checkout -b base-branch
+
+          # Create a bare repo to act as origin (reachable from workspace)
+          rm -rf "$GITHUB_WORKSPACE/.git-remote-subdir"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote-subdir"
+
+          # Push base branch to bare remote
+          git push "$GITHUB_WORKSPACE/.git-remote-subdir" base-branch:refs/heads/base-branch
+
+          # Create a feature branch with a new commit
+          git checkout -b feature-branch-path
+          echo "custom path feature content" > custom-path-feature.txt
+          git add custom-path-feature.txt
+          git commit -m "Add custom path feature file"
+
+          # Push feature branch to bare remote
+          git push "$GITHUB_WORKSPACE/.git-remote-subdir" feature-branch-path:refs/heads/feature-branch-path
+
+          # Go back to base branch
+          git checkout base-branch
+
+          # Point origin at the bare repo
+          git remote add origin "$GITHUB_WORKSPACE/.git-remote-subdir"
+
+          # Set up a fake GITHUB_EVENT_PATH with sender info
+          printf '{"sender":{"login":"github-actions"},"pusher":{"email":"github-actions@github.com"}}\n' > /tmp/fake-event.json
+          echo "GITHUB_EVENT_PATH=/tmp/fake-event.json" >> "$GITHUB_ENV"
+
+      - id: action
+        uses: .
+        with:
+          base_ref: base-branch
+          head_ref: refs/heads/feature-branch-path
+          path: repo-subdir
+          do_not_report: "true"
+
+      - name: Assert feature file exists in subdir after merge
+        env:
+          STATUS: ${{ steps.action.outputs.status }}
+          MESSAGE: ${{ steps.action.outputs.message }}
+        run: |
+          echo "status: $STATUS"
+          echo "message: $MESSAGE"
+          # The real indicator of success is the merged file being present in the subdir
+          if [ ! -f "$GITHUB_WORKSPACE/repo-subdir/custom-path-feature.txt" ]; then
+            echo "FAIL: custom-path-feature.txt not found in repo-subdir after merge"
+            exit 1
+          fi
+          echo "PASS: custom-path-feature.txt present in repo-subdir after merge"
