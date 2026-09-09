@@ -1,0 +1,1 @@
+# check-spelling-checkout-merge
