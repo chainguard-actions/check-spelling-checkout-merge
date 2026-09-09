@@ -1,0 +1,64 @@
+name: Test basic merge success
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up git remote reachable from the runner
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          # Create a bare repo under GITHUB_WORKSPACE so it's reachable
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git push "$GITHUB_WORKSPACE/.git-remote" --tags
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+      - name: Get current HEAD SHA for use as base and head refs
+        id: refs
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Create a fake GITHUB_EVENT_PATH with sender info
+        run: |
+          cat > /tmp/test-event.json <<'EOF'
+          {
+            "sender": { "login": "octocat" },
+            "pusher": { "email": "octocat@github.com" },
+            "pull_request": {
+              "base": { "sha": "" },
+              "head": { "sha": "" }
+            }
+          }
+          EOF
+
+      - id: action
+        uses: .
+        env:
+          GITHUB_EVENT_PATH: /tmp/test-event.json
+        with:
+          base_ref: ${{ steps.refs.outputs.sha }}
+          head_ref: ${{ steps.refs.outputs.sha }}
+          path: .
+
+      - name: Assert status is success
+        env:
+          STATUS: ${{ steps.action.outputs.status }}
+          MESSAGE: ${{ steps.action.outputs.message }}
+        run: |
+          echo "status: $STATUS"
+          echo "message: $MESSAGE"
+          if [ "$STATUS" != "success" ]; then
+            echo "FAIL: expected status 'success' but got '$STATUS'"
+            echo "message: $MESSAGE"
+            exit 1
+          fi
+          echo "PASS: merge succeeded"

@@ -1,0 +1,66 @@
+name: Test merge with custom path input
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up a separate git repo in a subdirectory
+        run: |
+          # Create a fresh git repo in a subdirectory to use as the 'path' target
+          mkdir -p "$GITHUB_WORKSPACE/subrepo"
+          cd "$GITHUB_WORKSPACE/subrepo"
+          git init
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo "hello" > README.md
+          git add README.md
+          git commit -m "Initial commit"
+          SHA=$(git rev-parse HEAD)
+          echo "SUBREPO_SHA=$SHA" >> "$GITHUB_ENV"
+
+          # Create a bare remote reachable from the runner
+          rm -rf "$GITHUB_WORKSPACE/subrepo-remote"
+          git init --bare "$GITHUB_WORKSPACE/subrepo-remote"
+          git push "$GITHUB_WORKSPACE/subrepo-remote" HEAD:refs/heads/main
+          git remote add origin "$GITHUB_WORKSPACE/subrepo-remote"
+
+      - name: Create a fake GITHUB_EVENT_PATH with sender info
+        run: |
+          cat > /tmp/test-event.json <<'EOF'
+          {
+            "sender": { "login": "octocat" },
+            "pusher": { "email": "octocat@github.com" },
+            "pull_request": {
+              "base": { "sha": "" },
+              "head": { "sha": "" }
+            }
+          }
+          EOF
+
+      - id: action
+        uses: .
+        env:
+          GITHUB_EVENT_PATH: /tmp/test-event.json
+        with:
+          base_ref: ${{ env.SUBREPO_SHA }}
+          head_ref: ${{ env.SUBREPO_SHA }}
+          path: subrepo
+
+      - name: Assert status is success with custom path
+        env:
+          STATUS: ${{ steps.action.outputs.status }}
+          MESSAGE: ${{ steps.action.outputs.message }}
+        run: |
+          echo "status: $STATUS"
+          echo "message: $MESSAGE"
+          if [ "$STATUS" != "success" ]; then
+            echo "FAIL: expected status 'success' but got '$STATUS'"
+            echo "message: $MESSAGE"
+            exit 1
+          fi
+          echo "PASS: merge succeeded with custom path"

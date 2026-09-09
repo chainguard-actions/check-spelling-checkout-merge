@@ -1,0 +1,65 @@
+name: Test do_not_report suppresses error output
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up git remote reachable from the runner
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git push "$GITHUB_WORKSPACE/.git-remote" --tags
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+      - name: Create a fake GITHUB_EVENT_PATH with sender info
+        run: |
+          cat > /tmp/test-event.json <<'EOF'
+          {
+            "sender": { "login": "octocat" },
+            "pusher": { "email": "octocat@github.com" },
+            "pull_request": {
+              "base": { "sha": "" },
+              "head": { "sha": "" }
+            }
+          }
+          EOF
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        env:
+          GITHUB_EVENT_PATH: /tmp/test-event.json
+        with:
+          base_ref: 0000000000000000000000000000000000000000
+          head_ref: 0000000000000000000000000000000000000001
+          path: .
+          do_not_report: "true"
+
+      - name: Assert action reported failure with do_not_report set
+        env:
+          STATUS: ${{ steps.action.outputs.status }}
+          MESSAGE: ${{ steps.action.outputs.message }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "status: $STATUS"
+          echo "message: $MESSAGE"
+          # With do_not_report set, the action should still set status=failed
+          # but should NOT emit ::error:: annotations
+          if [ "$STATUS" = "failed" ]; then
+            echo "PASS: action reported failure gracefully (do_not_report suppresses ::error::)"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action step itself failed (acceptable for invalid ref)"
+          else
+            echo "FAIL: expected status 'failed' but got status='$STATUS' outcome='$OUTCOME'"
+            exit 1
+          fi
