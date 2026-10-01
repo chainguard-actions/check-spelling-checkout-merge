@@ -1,0 +1,79 @@
+name: Test do_not_report suppresses error annotation
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up a local bare repo as origin
+        run: |
+          set -e
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+
+          # Create a bare repo under GITHUB_WORKSPACE so it's accessible
+          BARE="$GITHUB_WORKSPACE/.git-remote"
+          rm -rf "$BARE"
+          git init --bare "$BARE"
+
+          # Push current HEAD as 'main'
+          git push "$BARE" HEAD:refs/heads/main
+
+          # Point origin at the bare repo
+          git remote set-url origin "$BARE" 2>/dev/null || git remote add origin "$BARE"
+
+      # Test with do_not_report set to suppress error annotations
+      - id: merge-suppressed
+        uses: .
+        with:
+          base_ref: nonexistent-branch-abc-99999
+          head_ref: nonexistent-sha-abc-99999
+          path: .
+          do_not_report: "true"
+
+      - name: Assert failure is reported in outputs even when do_not_report is set
+        env:
+          STATUS: ${{ steps.merge-suppressed.outputs.status }}
+          MESSAGE: ${{ steps.merge-suppressed.outputs.message }}
+        run: |
+          echo "status: $STATUS"
+          echo "message: $MESSAGE"
+          if [ "$STATUS" != "failed" ]; then
+            echo "FAIL: expected status 'failed' but got '$STATUS'"
+            exit 1
+          fi
+          if [ -z "$MESSAGE" ]; then
+            echo "FAIL: expected a non-empty message"
+            exit 1
+          fi
+          echo "PASS: failure outputs are set even with do_not_report=true"
+
+      # Test with do_not_report empty (default) - should also fail gracefully
+      - id: merge-with-report
+        uses: .
+        with:
+          base_ref: nonexistent-branch-def-88888
+          head_ref: nonexistent-sha-def-88888
+          path: .
+          do_not_report: ""
+
+      - name: Assert failure is reported when do_not_report is empty
+        env:
+          STATUS: ${{ steps.merge-with-report.outputs.status }}
+          MESSAGE: ${{ steps.merge-with-report.outputs.message }}
+        run: |
+          echo "status: $STATUS"
+          echo "message: $MESSAGE"
+          if [ "$STATUS" != "failed" ]; then
+            echo "FAIL: expected status 'failed' but got '$STATUS'"
+            exit 1
+          fi
+          if [ -z "$MESSAGE" ]; then
+            echo "FAIL: expected a non-empty message"
+            exit 1
+          fi
+          echo "PASS: failure outputs are set with do_not_report empty"

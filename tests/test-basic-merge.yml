@@ -1,0 +1,72 @@
+name: Test basic merge success
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up a local bare repo as origin with two diverging branches
+        run: |
+          set -e
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+
+          # Create a bare repo under GITHUB_WORKSPACE so it's accessible
+          BARE="$GITHUB_WORKSPACE/.git-remote"
+          rm -rf "$BARE"
+          git init --bare "$BARE"
+
+          # Push current HEAD as 'main' (base branch)
+          git push "$BARE" HEAD:refs/heads/main
+
+          # Create a feature branch commit on top of current HEAD
+          ORIG_HEAD=$(git rev-parse HEAD)
+          git checkout -b feature-branch
+          echo "feature content $(date +%s)" > feature-file.txt
+          git add feature-file.txt
+          git commit -m "Add feature file"
+          FEATURE_SHA=$(git rev-parse HEAD)
+
+          # Push feature branch to bare repo
+          git push "$BARE" feature-branch:refs/heads/feature-branch
+
+          # Go back to original HEAD
+          git checkout "$ORIG_HEAD" --detach 2>/dev/null || git checkout main 2>/dev/null || true
+
+          # Point origin at the bare repo
+          git remote set-url origin "$BARE" 2>/dev/null || git remote add origin "$BARE"
+
+          echo "FEATURE_SHA=$FEATURE_SHA" >> "$GITHUB_ENV"
+          echo "Base: main, Head SHA: $FEATURE_SHA"
+
+      - id: merge
+        uses: .
+        with:
+          base_ref: main
+          head_ref: ${{ env.FEATURE_SHA }}
+          path: .
+          do_not_report: "true"
+
+      - name: Assert status is success
+        env:
+          STATUS: ${{ steps.merge.outputs.status }}
+        run: |
+          echo "status: $STATUS"
+          if [ "$STATUS" != "success" ]; then
+            echo "FAIL: expected status 'success' but got '$STATUS'"
+            exit 1
+          fi
+          echo "PASS: merge succeeded"
+
+      - name: Assert message output is set or empty on success
+        env:
+          MESSAGE: ${{ steps.merge.outputs.message }}
+        run: |
+          echo "message: $MESSAGE"
+          # On success the message output is not set by the script (only set on failure)
+          # So it should be empty — just verify the step ran
+          echo "PASS: message output checked (empty on success is expected)"

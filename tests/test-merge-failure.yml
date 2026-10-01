@@ -1,0 +1,57 @@
+name: Test merge failure with invalid refs
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up a local bare repo as origin
+        run: |
+          set -e
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+
+          # Create a bare repo under GITHUB_WORKSPACE so it's accessible
+          BARE="$GITHUB_WORKSPACE/.git-remote"
+          rm -rf "$BARE"
+          git init --bare "$BARE"
+
+          # Push current HEAD as 'main'
+          git push "$BARE" HEAD:refs/heads/main
+
+          # Point origin at the bare repo
+          git remote set-url origin "$BARE" 2>/dev/null || git remote add origin "$BARE"
+
+      - id: merge
+        uses: .
+        with:
+          base_ref: nonexistent-branch-xyz-12345
+          head_ref: nonexistent-sha-xyz-12345
+          path: .
+          do_not_report: "true"
+
+      - name: Assert status is failed
+        env:
+          STATUS: ${{ steps.merge.outputs.status }}
+        run: |
+          echo "status: $STATUS"
+          if [ "$STATUS" != "failed" ]; then
+            echo "FAIL: expected status 'failed' but got '$STATUS'"
+            exit 1
+          fi
+          echo "PASS: merge correctly reported failure"
+
+      - name: Assert message output is non-empty on failure
+        env:
+          MESSAGE: ${{ steps.merge.outputs.message }}
+        run: |
+          echo "message: $MESSAGE"
+          if [ -z "$MESSAGE" ]; then
+            echo "FAIL: expected a non-empty message on failure"
+            exit 1
+          fi
+          echo "PASS: failure message is set: $MESSAGE"

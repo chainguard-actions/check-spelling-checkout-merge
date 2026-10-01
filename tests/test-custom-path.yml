@@ -1,0 +1,69 @@
+name: Test merge with custom path input
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up a separate repo in a subdirectory
+        run: |
+          set -e
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+
+          # Create a fresh git repo in a subdirectory
+          SUBDIR="$GITHUB_WORKSPACE/myrepo"
+          mkdir -p "$SUBDIR"
+          cd "$SUBDIR"
+          git init
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+
+          # Create initial commit on main
+          echo "initial content" > README.md
+          git add README.md
+          git commit -m "Initial commit"
+
+          # Create a bare repo to serve as origin
+          BARE="$GITHUB_WORKSPACE/.git-remote-sub"
+          rm -rf "$BARE"
+          git init --bare "$BARE"
+          git remote add origin "$BARE"
+          git push origin HEAD:refs/heads/main
+
+          # Create a feature branch
+          git checkout -b feature-xyz
+          echo "feature content $(date +%s)" > feature.txt
+          git add feature.txt
+          git commit -m "Add feature"
+          FEATURE_SHA=$(git rev-parse HEAD)
+          git push origin feature-xyz:refs/heads/feature-xyz
+
+          # Go back to main
+          git checkout main
+
+          echo "FEATURE_SHA=$FEATURE_SHA" >> "$GITHUB_ENV"
+          echo "Subdir repo set up. Feature SHA: $FEATURE_SHA"
+
+      - id: merge
+        uses: .
+        with:
+          base_ref: main
+          head_ref: ${{ env.FEATURE_SHA }}
+          path: myrepo
+          do_not_report: "true"
+
+      - name: Assert status is success
+        env:
+          STATUS: ${{ steps.merge.outputs.status }}
+        run: |
+          echo "status: $STATUS"
+          if [ "$STATUS" != "success" ]; then
+            echo "FAIL: expected status 'success' but got '$STATUS'"
+            exit 1
+          fi
+          echo "PASS: merge with custom path succeeded"
