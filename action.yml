@@ -60,6 +60,4 @@ runs:
         INPUT_DO_NOT_REPORT: ${{ inputs.do_not_report }}
         GH_TOKEN: ${{ github.token }}
         ACTION_PATH: ${{ github.action_path }}
-      run: |
-        script_path="${ACTION_PATH%/}/merge"
-        bash "$script_path"
+      run: "$ACTION_PATH/merge"

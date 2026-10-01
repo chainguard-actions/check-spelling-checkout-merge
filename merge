@@ -66,17 +66,17 @@ wrap_in_backticks() {
 }
 
 report_failure() {
-    safe_message=$(printf '%s' "$1" | tr -d '\n\r')
     echo "MERGE_FAILED=1" >> "$GITHUB_ENV"
     echo 'status=failed' >> "$GITHUB_OUTPUT"
-    printf 'message=%s\n' "$safe_message" >> "$GITHUB_OUTPUT"
+    safe_message=$(printf '%s' "$1" | tr -d '\n\r')
+    echo "message=$safe_message" >> "$GITHUB_OUTPUT"
     if [ -z "$INPUT_DO_NOT_REPORT" ]; then
-        echo "::error ::$safe_message"
+        echo "::error ::$1"
         if [ -f "$GITHUB_STEP_SUMMARY" ]; then
         (
             echo "# checkout-merge failed
 
-:x: $safe_message"
+:x: $1"
             if [ -s "$log" ]; then
                 echo
                 wrap_in_backticks "$log"
