@@ -10,42 +10,33 @@
 
 **Harden Agent Version:** `2`
 
-Action **check-spelling--checkout-merge/v0.0.4** was hardened automatically. 3 finding(s) were identified and resolved across 1 iteration(s).
+Action **check-spelling--checkout-merge/v0.0.4** was hardened automatically. 2 finding(s) were identified and resolved across 1 iteration(s).
 
 ## Findings Fixed
 
 ### script-injection (severity: high)
 
-Sub-rule (a): The `run:` field in action.yml directly interpolates `${{ github.action_path }}` into the shell command string. Any `${{ ... }}` expression inside a `run:` block is a script-injection risk because the value is substituted by the YAML template engine before the shell ever sees it. Offending line: `run: ${{ github.action_path }}/merge`
+Sub-rule (a): A ${{ }} expression is directly interpolated inside the run: shell command string. The line `run: ${{ github.action_path }}/merge` causes GitHub Actions to substitute the expression value into the shell command before the shell ever sees it. Any ${{ ... }} in a run: block is a script-injection risk regardless of which context it reads from.
 
 Locations:
 
-- `action.yml:47`
+- `action.yml:44`
 
 ### github-env-injection (severity: high)
 
-The `report_failure()` function in the `merge` script writes unsanitized, user-controlled values to `$GITHUB_OUTPUT` and `$GITHUB_ENV` without the required sanitization step (`printf '%s' ... | tr -d '\n\r'`). The argument `$1` passed to `report_failure` is constructed from `$INPUT_BASE_REF`, `$INPUT_HEAD_REF`, and `$INPUT_PATH`, which are all set from `inputs.*` in action.yml. A newline-containing input value could inject additional key=value pairs. Offending lines: `echo "MERGE_FAILED=1" >> "$GITHUB_ENV"` (line 38), `echo "message=$1" >> "$GITHUB_OUTPUT"` (line 40).
+The report_failure() function in the merge script writes `echo "message=$1" >> "$GITHUB_OUTPUT"` without sanitization. The argument $1 is constructed from $INPUT_BASE_REF and $INPUT_HEAD_REF (e.g. `report_failure "Can't get history for base_ref ($INPUT_BASE_REF)..."`) which are set from inputs.base_ref and inputs.head_ref — untrusted caller-controlled inputs. A newline embedded in these values could inject arbitrary key=value pairs into $GITHUB_OUTPUT. The required sanitization step (`printf '%s' "$VAR" | tr -d '\n\r'`) is absent before every write.
 
 Locations:
 
-- `merge:38`
-- `merge:40`
-
-### unpinned-uses (severity: high)
-
-The workflow file uses `actions/checkout@v3`, which is pinned to a mutable tag rather than an immutable 40-character SHA commit hash. This means the action could be silently updated to a different (potentially malicious) version without any change to the workflow file. It should be pinned to a full SHA, e.g. `actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v3`.
-
-Locations:
-
-- `.github/workflows/checkout.yml:14`
+- `merge:41`
 
 ## Iteration Notes
 
 ### Iteration 1
 
-**Fixes applied:** script-injection, github-env-injection, unpinned-uses
+**Fixes applied:** script-injection, github-env-injection
 
 **Notes:**
 
-1. script-injection (action.yml line 47): Moved `${{ github.action_path }}` from the `run:` field into the `env:` block as `ACTION_PATH: ${{ github.action_path }}`, then changed `run:` to `"$ACTION_PATH/merge"` to avoid template interpolation in the shell command string. 2. github-env-injection (merge lines 38, 40): Added sanitization in `report_failure()` using `safe_message=$(printf '%s' "$1" | tr -d '\n\r')` before writing to `$GITHUB_OUTPUT`, preventing newline injection from user-controlled input values. The `MERGE_FAILED=1` write is a hardcoded constant and safe as-is. 3. unpinned-uses (checkout.yml line 14): Pinned `actions/checkout@v3` to the full immutable SHA `actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26 # v3`.
+1. script-injection (action.yml line 44): Moved `${{ github.action_path }}` out of the `run:` shell command and into the `env:` block as `ACTION_PATH: ${{ github.action_path }}`. The run command now uses `"$ACTION_PATH/merge"` — a plain environment variable reference with no expression interpolation in the shell string. 2. github-env-injection (merge line 41): In the `report_failure()` function, added `safe_message=$(printf '%s' "$1" | tr -d '\n\r')` before writing to `$GITHUB_OUTPUT`, and updated both the `echo "message=..."` and the `::error ::` annotation to use `$safe_message`. This prevents newline-embedded values in `INPUT_BASE_REF` or `INPUT_HEAD_REF` from injecting arbitrary key=value pairs into `$GITHUB_OUTPUT`.
 
